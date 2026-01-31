@@ -1,0 +1,329 @@
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using NickButlerAdroit.Api.Exceptions;
+using NickButlerAdroit.Api.Hubs;
+using NickButlerAdroit.Api.Models;
+using NickButlerAdroit.Api.Repositories;
+
+namespace NickButlerAdroit.Api.Services;
+
+/// <summary>
+/// Core business logic for URL shortening operations.
+/// Handles URL validation/normalization, short code generation, click tracking,
+/// and real-time event broadcasting via SignalR. Marked as partial to support
+/// the source-generated regex (<see cref="CustomCodeRegex"/>).
+/// </summary>
+public partial class UrlShortenerService : IUrlShortenerService
+{
+    /// <summary>Length of auto-generated short codes (62^7 ≈ 3.5 trillion combinations).</summary>
+    private const int GeneratedCodeLength = 7;
+
+    /// <summary>Base62 character set used for random short code generation.</summary>
+    private const string AlphanumericChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+    private readonly IUrlRepository _repository;
+    private readonly IHubContext<UrlHub> _hubContext;
+    private readonly ILogger<UrlShortenerService> _logger;
+
+    public UrlShortenerService(IUrlRepository repository, IHubContext<UrlHub> hubContext, ILogger<UrlShortenerService> logger)
+    {
+        _repository = repository;
+        _hubContext = hubContext;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Fire-and-forget SignalR notification to all connected clients.
+    /// Failures are logged but do not propagate — a failed notification should never
+    /// break a URL operation. Uses ContinueWith instead of await to avoid blocking.
+    /// </summary>
+    private void NotifyClients(string eventName, params object[] args)
+    {
+        _ = _hubContext.Clients.All.SendCoreAsync(eventName, args)
+            .ContinueWith(t => _logger.LogWarning(t.Exception, "Failed to send SignalR notification: {Event}", eventName),
+                TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+    /// <summary>Returns all URLs, each enriched with aggregate long-URL click counts.</summary>
+    public async Task<IReadOnlyList<ShortUrlResult>> GetAllAsync()
+    {
+        var entries = await _repository.GetAllAsync();
+        var results = new List<ShortUrlResult>();
+        foreach (var entry in entries)
+        {
+            results.Add(await ToResultAsync(entry));
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// Returns a paginated, optionally filtered list of URLs.
+    /// Total count is fetched separately to support pagination controls in the frontend.
+    /// </summary>
+    public async Task<PagedResult<ShortUrlResult>> GetPagedAsync(int offset, int limit, string? search = null)
+    {
+        var totalCount = await _repository.GetCountAsync(search);
+        var entries = await _repository.GetPagedAsync(offset, limit, search);
+        var items = new List<ShortUrlResult>();
+        foreach (var entry in entries)
+        {
+            items.Add(await ToResultAsync(entry));
+        }
+        return new PagedResult<ShortUrlResult>(items, totalCount);
+    }
+
+    /// <summary>Returns the N most recently created URLs (sorted by CreatedAt descending).</summary>
+    public async Task<IReadOnlyList<ShortUrlResult>> GetRecentAsync(int count)
+    {
+        var entries = await _repository.GetPagedAsync(0, count);
+        var results = new List<ShortUrlResult>();
+        foreach (var entry in entries)
+        {
+            results.Add(await ToResultAsync(entry));
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// Creates a new shortened URL. If a custom code is provided, validates and uses it directly.
+    /// For auto-generated codes, retries up to 5 times on collision (unlikely with 62^7 space).
+    /// The long URL is validated (HTTP/HTTPS only) and normalized before storage to prevent
+    /// duplicate entries caused by case, trailing slashes, or default ports.
+    /// </summary>
+    public async Task<ShortUrlResult> CreateAsync(string longUrl, string? customCode = null)
+    {
+        var normalizedUrl = ValidateAndNormalizeUrl(longUrl);
+
+        // Custom code path: user provides their own alias
+        if (customCode is not null)
+        {
+            ValidateCustomCode(customCode);
+            var entry = new ShortUrlEntry(customCode, normalizedUrl);
+            if (!await _repository.AddAsync(entry))
+            {
+                throw new DuplicateShortCodeException(customCode);
+            }
+            var result = await ToResultAsync(entry);
+            NotifyClients("UrlCreated", result);
+            return result;
+        }
+
+        // Auto-generated code path: retry on collision (ConcurrentDictionary.TryAdd returns false)
+        const int maxRetries = 5;
+        for (var attempt = 0; attempt < maxRetries; attempt++)
+        {
+            var shortCode = GenerateShortCode();
+            var entry = new ShortUrlEntry(shortCode, normalizedUrl);
+            if (await _repository.AddAsync(entry))
+            {
+                var result = await ToResultAsync(entry);
+                NotifyClients("UrlCreated", result);
+                return result;
+            }
+        }
+
+        throw new DuplicateShortCodeException(
+            $"Failed to generate a unique short code after {maxRetries} attempts.");
+    }
+
+    /// <summary>
+    /// Resolves a short code via the API — returns full metadata and increments click count.
+    /// The result includes updated click counts (pre-increment values + 1) since the
+    /// increment and read are not atomic; this provides the most accurate count to the caller.
+    /// </summary>
+    public async Task<ShortUrlResult> ResolveAsync(string shortCode)
+    {
+        ValidateShortCode(shortCode);
+
+        var entry = await _repository.GetByShortCodeAsync(shortCode);
+        if (entry is null)
+        {
+            throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
+        }
+
+        await _repository.IncrementClickCountAsync(shortCode);
+        var result = await ToResultAsync(entry);
+        NotifyClients("UrlClicked", result.ShortCode, result.ClickCount + 1, result.LongUrl, result.LongUrlClickCount + 1);
+        return result with { ClickCount = result.ClickCount + 1, LongUrlClickCount = result.LongUrlClickCount + 1 };
+    }
+
+    /// <summary>
+    /// Resolves a short code for the redirect controller — returns only the long URL string
+    /// for a fast 302 response. Increments click count and computes aggregate long-URL clicks
+    /// across all short codes pointing to the same destination.
+    /// </summary>
+    public async Task<string> ResolveForRedirectAsync(string shortCode)
+    {
+        ValidateShortCode(shortCode);
+
+        var entry = await _repository.GetByShortCodeAsync(shortCode);
+        if (entry is null)
+        {
+            throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
+        }
+
+        var newClickCount = await _repository.IncrementClickCountAsync(shortCode);
+        // Aggregate clicks across all short codes that point to the same long URL
+        var allEntries = await _repository.GetByLongUrlAsync(entry.LongUrl);
+        var longUrlClickCount = allEntries.Sum(e => e.ClickCount) + 1;
+        NotifyClients("UrlClicked", shortCode, newClickCount, entry.LongUrl, longUrlClickCount);
+        return entry.LongUrl;
+    }
+
+    /// <summary>Returns click statistics for a specific short code.</summary>
+    public async Task<UrlStats> GetStatsAsync(string shortCode)
+    {
+        ValidateShortCode(shortCode);
+
+        var entry = await _repository.GetByShortCodeAsync(shortCode);
+        if (entry is null)
+        {
+            throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
+        }
+
+        return new UrlStats(entry.ShortCode, entry.ClickCount, entry.CreatedAt);
+    }
+
+    /// <summary>
+    /// Deletes a shortened URL and broadcasts a UrlDeleted event to all SignalR clients.
+    /// </summary>
+    public async Task DeleteAsync(string shortCode)
+    {
+        ValidateShortCode(shortCode);
+
+        if (!await _repository.DeleteAsync(shortCode))
+        {
+            throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
+        }
+
+        NotifyClients("UrlDeleted", shortCode);
+    }
+
+    /// <summary>
+    /// Validates that the URL is well-formed and uses HTTP or HTTPS scheme.
+    /// Rejects non-HTTP schemes (ftp://, javascript:, data:, etc.) to prevent
+    /// open redirect abuse and phishing attacks. Normalizes the URL before returning.
+    /// </summary>
+    private static string ValidateAndNormalizeUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            throw new ArgumentException("Invalid URL format.");
+        }
+
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new ArgumentException("Only HTTP and HTTPS URLs are allowed.");
+        }
+
+        return NormalizeUrl(uri);
+    }
+
+    /// <summary>
+    /// Normalizes a URL to a canonical form to prevent duplicate entries.
+    /// - Lowercases scheme and host (RFC 3986 §3.1, §3.2.2)
+    /// - Strips default ports (80 for HTTP, 443 for HTTPS)
+    /// - Removes trailing slashes from paths
+    /// - Preserves query strings and fragments as-is
+    /// </summary>
+    private static string NormalizeUrl(Uri uri)
+    {
+        var scheme = uri.Scheme.ToLowerInvariant();
+        var host = uri.Host.ToLowerInvariant();
+
+        // Only include port if it's non-default for the scheme
+        var includePort = uri.Port != -1 &&
+            !((scheme == "http" && uri.Port == 80) ||
+              (scheme == "https" && uri.Port == 443));
+
+        // Strip trailing slashes (but keep root "/" as empty string)
+        var path = uri.AbsolutePath;
+        if (path.EndsWith('/') && path.Length > 1)
+        {
+            path = path.TrimEnd('/');
+        }
+        else if (path == "/")
+        {
+            path = "";
+        }
+
+        var portPart = includePort ? $":{uri.Port}" : "";
+        var queryPart = string.IsNullOrEmpty(uri.Query) ? "" : uri.Query;
+        var fragmentPart = string.IsNullOrEmpty(uri.Fragment) ? "" : uri.Fragment;
+
+        return $"{scheme}://{host}{portPart}{path}{queryPart}{fragmentPart}";
+    }
+
+    /// <summary>
+    /// Validates a user-provided custom short code (alias).
+    /// Must be 5–20 characters, alphanumeric only — prevents injection and ensures URL-safety.
+    /// </summary>
+    private static void ValidateCustomCode(string code)
+    {
+        if (code.Length < 5 || code.Length > 20)
+        {
+            throw new ArgumentException("Custom code must be between 5 and 20 characters.");
+        }
+
+        if (!CustomCodeRegex().IsMatch(code))
+        {
+            throw new ArgumentException("Custom code must contain only alphanumeric characters.");
+        }
+    }
+
+    /// <summary>
+    /// Validates any short code (custom or auto-generated) before use in lookups.
+    /// Ensures it's non-empty, not too long, and alphanumeric to prevent injection.
+    /// </summary>
+    private static void ValidateShortCode(string shortCode)
+    {
+        if (string.IsNullOrWhiteSpace(shortCode))
+        {
+            throw new ArgumentException("Short code is required.");
+        }
+
+        if (shortCode.Length > 20)
+        {
+            throw new ArgumentException("Short code is too long.");
+        }
+
+        if (!CustomCodeRegex().IsMatch(shortCode))
+        {
+            throw new ArgumentException("Invalid short code format.");
+        }
+    }
+
+    /// <summary>
+    /// Generates a random 7-character base62 short code using <see cref="Random.Shared"/>
+    /// (thread-safe). Uses string.Create for zero-allocation string building.
+    /// With 62^7 ≈ 3.5 trillion combinations, collision probability is negligible
+    /// for in-memory storage scenarios.
+    /// </summary>
+    private static string GenerateShortCode()
+    {
+        return string.Create(GeneratedCodeLength, Random.Shared, (span, random) =>
+        {
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = AlphanumericChars[random.Next(AlphanumericChars.Length)];
+            }
+        });
+    }
+
+    /// <summary>
+    /// Converts a storage entry to an API result, enriching it with the aggregate
+    /// click count across all short codes pointing to the same long URL.
+    /// This allows the frontend to show "total clicks for this destination."
+    /// </summary>
+    private async Task<ShortUrlResult> ToResultAsync(ShortUrlEntry entry)
+    {
+        var allEntries = await _repository.GetByLongUrlAsync(entry.LongUrl);
+        var longUrlClickCount = allEntries.Sum(e => e.ClickCount);
+        return new ShortUrlResult(entry.ShortCode, entry.LongUrl, entry.ClickCount, longUrlClickCount, entry.CreatedAt);
+    }
+
+    /// <summary>Source-generated regex for validating alphanumeric-only strings.</summary>
+    [GeneratedRegex("^[a-zA-Z0-9]+$")]
+    private static partial Regex CustomCodeRegex();
+}

@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Nick-Butler-Adroit.Api/Nick-Butler-Adroit.Api.csproj" />
+  <Project Path="Nick-Butler-Adroit.Tests/Nick-Butler-Adroit.Tests.csproj" />
+</Solution>

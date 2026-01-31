@@ -1,0 +1,24 @@
+# Claude Code configuration
+.claude/
+
+# Project notes
+FUTURE_ENHANCEMENTS.md
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Node / Frontend
+node_modules/
+coverage/
+build/
+.env.local
+.env.*.local
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
