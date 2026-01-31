@@ -23,7 +23,16 @@ builder.Services.AddSignalR()
     {
         options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
     });
-builder.Services.AddOpenApi();       // OpenAPI/Swagger document generation
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, context, ct) =>
+    {
+        document.Info.Title = "Nick-Butler-Adroit URL Shortener API";
+        document.Info.Description = "A URL shortener proof-of-concept API. Create, resolve, and manage shortened URLs with click statistics and real-time notifications via SignalR.";
+        document.Info.Version = "v1";
+        return Task.CompletedTask;
+    });
+});
 
 // Configure rate limiting with fixed-window policies to prevent abuse.
 // Each policy tracks requests per IP within a 1-minute sliding window.

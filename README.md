@@ -1,17 +1,18 @@
 # Nick-Butler-Adroit
 
-A URL shortener proof-of-concept with a C# ASP.NET Core Web API backend and React TypeScript frontend. All data is stored in-memory using `ConcurrentDictionary` — no database or external services required.
+A URL shortener proof-of-concept with a C# ASP.NET Core Web API backend and React TypeScript frontend. All data is stored in-memory, the application
+could be extended to support persistent storage by implementing IUrlRepository with a database for instance.
 
 ## Features
 
-- Create shortened URLs with auto-generated (7-char base62) or custom short codes
-- Resolve short codes via HTTP 302 redirect
+- Create shortened URLs with auto-generated or custom user supplied short codes
+- Per-code short code and aggregate long url click statistics
 - Delete shortened URLs
-- Per-code and aggregate click statistics
 - Real-time updates via SignalR (create, click, delete events)
-- Paginated link listing with search filtering and virtual scrolling
-- Rate limiting on creation, resolution, and redirect endpoints
+- Paginated all created links page with search filtering and virtual scrolling
+- Rate limiting on creation, resolution, and redirect endpoints to prevent abuse
 - URL validation and normalization (HTTP/HTTPS only, case-insensitive, trailing slash removal)
+- Supports concurrent requests from multiple users
 
 ## Prerequisites
 
@@ -45,7 +46,7 @@ The React app starts at `http://localhost:3000` and proxies API calls to the bac
 # Backend (xUnit)
 dotnet test
 
-# Frontend (Jest)
+# Frontend (ViTest)
 cd nick-butler-adroit-frontend
 npm test
 
@@ -71,7 +72,7 @@ Nick-Butler-Adroit.Tests/
 
 nick-butler-adroit-frontend/
   src/
-    pages/         HomePage (shortener form) and AllLinksPage (virtual scroll list)
+    pages/         HomePage (shortener form) and AllLinksPage (virtual scroll list of every saved link)
     components/    Reusable UI components (form, URL list, stats display)
     services/      REST API client and SignalR connection management
     types/         Shared TypeScript interfaces

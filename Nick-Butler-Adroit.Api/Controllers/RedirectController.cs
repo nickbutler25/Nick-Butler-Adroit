@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using NickButlerAdroit.Api.Models;
 using NickButlerAdroit.Api.Services;
 
 namespace NickButlerAdroit.Api.Controllers;
@@ -15,10 +16,12 @@ namespace NickButlerAdroit.Api.Controllers;
 public class RedirectController : ControllerBase
 {
     private readonly IUrlShortenerService _service;
+    private readonly ILogger<RedirectController> _logger;
 
-    public RedirectController(IUrlShortenerService service)
+    public RedirectController(IUrlShortenerService service, ILogger<RedirectController> logger)
     {
         _service = service;
+        _logger = logger;
     }
 
     /// <summary>
@@ -34,15 +37,18 @@ public class RedirectController : ControllerBase
         try
         {
             var longUrl = await _service.ResolveForRedirectAsync(shortCode);
+            _logger.LogInformation("Redirect: {ShortCode} -> {LongUrl}", shortCode, longUrl);
             return Redirect(longUrl);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            _logger.LogWarning("Redirect bad request for '{ShortCode}': {Message}", shortCode, ex.Message);
+            return BadRequest(new ErrorResponse(ex.Message));
         }
         catch (KeyNotFoundException)
         {
-            return NotFound(new { error = $"Short code '{shortCode}' not found." });
+            _logger.LogWarning("Redirect not found: '{ShortCode}'", shortCode);
+            return NotFound(new ErrorResponse($"Short code '{shortCode}' not found."));
         }
     }
 }

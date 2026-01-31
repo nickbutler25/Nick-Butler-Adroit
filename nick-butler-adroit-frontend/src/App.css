@@ -1,0 +1,497 @@
+/*
+ * Nick-Butler-Adroit Frontend — Main Stylesheet
+ *
+ * Organized into sections:
+ *   1. Layout (App container, page variants)
+ *   2. Form (URL shortener form, inputs, domain/alias row)
+ *   3. Buttons (submit, delete, dismiss)
+ *   4. Banners (API unavailable, error)
+ *   5. URL List (items, stats, actions)
+ *   6. All Links Page (virtual scroll, search)
+ *
+ * Color palette:
+ *   Primary green:  #0b6e4f (links, borders, accents)
+ *   Dark header:    #1a3a4a (submit button)
+ *   Error red:      #cc3333
+ *   Muted gray:     #888 (secondary text)
+ */
+
+/* ═══════════════════════════════════════════
+   1. LAYOUT — App container and page sizing
+   ═══════════════════════════════════════════ */
+
+/* Base app container — centered with max-width for readability */
+.App {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Home page uses tighter layout for a compact, focused form experience */
+.home-page {
+  max-width: 480px;
+  padding: 1.5rem;
+  font-size: 0.9rem;
+}
+
+h1 {
+  color: #333;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+/* Home page overrides — smaller headings and tighter spacing */
+.home-page h1 {
+  font-size: 1.4rem;
+  margin-bottom: 1rem;
+}
+
+.home-page h2 {
+  font-size: 1rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.home-page .url-form {
+  padding: 1.1rem 1.25rem 0.9rem;
+  margin-bottom: 1.25rem;
+}
+
+.home-page .form-title {
+  font-size: 0.92rem;
+  margin: 0 0 0.9rem;
+  padding-bottom: 0.5rem;
+}
+
+.home-page .submit-btn {
+  padding: 0.6rem;
+  font-size: 0.92rem;
+}
+
+.home-page .url-item {
+  padding: 0.7rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+}
+
+.home-page .view-all-link {
+  margin-top: 1rem;
+}
+
+/* ═══════════════════════════════════════════
+   2. FORM — URL shortener form and inputs
+   ═══════════════════════════════════════════ */
+
+/* Form card with subtle border and rounded corners */
+.url-form {
+  margin-bottom: 2rem;
+  padding: 1.5rem 1.75rem 1.25rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+/* Form title with inline SVG icon */
+.form-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #2b3a42;
+  margin: 0 0 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid #eee;
+}
+
+.form-title-icon {
+  color: #0b6e4f;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+/* Field labels with inline icon */
+.field-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #2b3a42;
+}
+
+.field-icon {
+  color: #555;
+  flex-shrink: 0;
+}
+
+/* Red asterisk for required fields */
+.required {
+  color: #cc3333;
+}
+
+/* Long URL input — prominent green border to indicate primary input */
+.form-group input,
+.input-long-url {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 2px solid #0b6e4f;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+/* Focus state — darker border with subtle green glow */
+.form-group input:focus,
+.input-long-url:focus {
+  border-color: #08573e;
+  box-shadow: 0 0 0 3px rgba(11, 110, 79, 0.12);
+}
+
+.form-group input::placeholder,
+.input-long-url::placeholder,
+.input-alias::placeholder {
+  color: #aaa;
+}
+
+/* Domain + Alias row — side-by-side layout with a "/" separator */
+
+.domain-alias-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  margin-bottom: 1.25rem;
+}
+
+/* Domain dropdown (currently disabled — single domain only) */
+.domain-group {
+  flex: 0 0 auto;
+}
+
+/* Alias input group — fills remaining space */
+.alias-group {
+  flex: 1;
+}
+
+/* "/" separator between domain and alias, vertically aligned with inputs */
+.domain-alias-separator {
+  /* label line-height (~20px) + label margin-bottom (0.4rem ~ 6.4px) ~ 26px top offset to align with inputs */
+  margin-top: 1.65rem;
+  padding: 0.65rem 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: #999;
+}
+
+/* Domain selector (disabled, shows current domain) */
+.input-domain {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  background: #fff;
+  color: #333;
+  appearance: auto;
+  cursor: default;
+  box-sizing: border-box;
+}
+
+/* Custom alias input — lighter border than the primary URL input */
+.input-alias {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-alias:focus {
+  border-color: #0b6e4f;
+  box-shadow: 0 0 0 3px rgba(11, 110, 79, 0.12);
+}
+
+/* Helper text below the alias input */
+.hint-text {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  color: #0b6e4f;
+  font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════
+   3. BUTTONS — Submit, delete, dismiss
+   ═══════════════════════════════════════════ */
+
+/* Base button style — green with hover darkening */
+button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #0b6e4f;
+  color: white;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: #08573e;
+}
+
+/* Full-width submit button with dark header color */
+.submit-btn {
+  display: block;
+  width: 100%;
+  padding: 0.8rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  background: #1a3a4a;
+  border-radius: 8px;
+  margin-top: 0.5rem;
+}
+
+.submit-btn:hover {
+  background: #15303d;
+}
+
+/* Red delete button for destructive actions */
+.delete-btn {
+  background: #cc3333;
+}
+
+.delete-btn:hover {
+  background: #aa2222;
+}
+
+/* ═══════════════════════════════════════════
+   4. BANNERS — API unavailable, error alerts
+   ═══════════════════════════════════════════ */
+
+/* Yellow warning banner shown when the backend API is unreachable */
+.api-unavailable-banner {
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  color: #856404;
+  text-align: center;
+  font-weight: 500;
+}
+
+/* Inline error text (below form fields) */
+.error {
+  color: #cc3333;
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+}
+
+/* Red error banner with dismiss button (above URL list) */
+.error-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: #fdecea;
+  border: 1px solid #f5c6cb;
+  border-radius: 8px;
+  color: #721c24;
+}
+
+/* Transparent dismiss "x" button inside error banners */
+.dismiss-btn {
+  background: transparent;
+  color: #721c24;
+  border: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.dismiss-btn:hover {
+  background: transparent;
+  color: #491217;
+}
+
+/* ═══════════════════════════════════════════
+   5. URL LIST — Items, stats, actions
+   ═══════════════════════════════════════════ */
+
+/* Shown when no URLs have been created yet */
+.empty-message {
+  color: #888;
+  font-style: italic;
+}
+
+/* Remove default list styling */
+.url-list {
+  list-style: none;
+  padding: 0;
+}
+
+/* Individual URL card — horizontal layout with info on the left and actions on the right */
+.url-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  background: white;
+}
+
+/* Vertical stack: short link → long URL → stats */
+.url-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* Short link — green, clickable, wraps on long URLs */
+.url-info a {
+  color: #0b6e4f;
+  word-break: break-all;
+  text-decoration: none;
+}
+
+.url-info a:hover {
+  text-decoration: underline;
+}
+
+/* Long URL display — muted gray, smaller text */
+.long-url {
+  color: #888;
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+/* Click statistics line */
+.url-stats {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+/* Action buttons container (delete, etc.) */
+.url-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════
+   6. NAVIGATION — View All link
+   ═══════════════════════════════════════════ */
+
+.view-all-link {
+  text-align: center;
+  margin-top: 1.5rem;
+}
+
+.view-all-link a {
+  color: #0b6e4f;
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.view-all-link a:hover {
+  text-decoration: underline;
+}
+
+/* ═══════════════════════════════════════════
+   7. ALL LINKS PAGE — Virtual scroll & search
+   ═══════════════════════════════════════════ */
+
+/* Full-height flexbox layout so the virtual list fills available space */
+.all-links-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: 720px;
+  padding-bottom: 0;
+  box-sizing: border-box;
+}
+
+.all-links-page .all-links-header {
+  margin-bottom: 1rem;
+  flex-shrink: 0;
+}
+
+/* Container for the react-window virtual list — fills remaining vertical space */
+.all-links-list-container {
+  flex: 1;
+  min-height: 0;  /* Required for flex child to allow overflow scrolling */
+}
+
+/* Back navigation link */
+.back-link {
+  color: #0b6e4f;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+/* Search bar container */
+.search-bar {
+  margin: 0.75rem 0 0.5rem;
+}
+
+/* Search input — full width with focus glow */
+.search-input {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-input:focus {
+  border-color: #0b6e4f;
+  box-shadow: 0 0 0 3px rgba(11, 110, 79, 0.12);
+}
+
+.search-input::placeholder {
+  color: #aaa;
+}
+
+/* Total link count displayed below the search bar */
+.total-count {
+  color: #888;
+  font-size: 0.9rem;
+  margin: 0.25rem 0 0;
+}
+
+/* Virtual list rows — flat (no border-radius) with bottom border separator */
+.all-links-row {
+  box-sizing: border-box;
+  margin-bottom: 0;
+  border-bottom: 1px solid #eee;
+  border-radius: 0;
+}
+
+/* Placeholder shown while a virtual list row is being loaded from the API */
+.loading-placeholder {
+  color: #aaa;
+  font-style: italic;
+  padding: 1rem;
+}

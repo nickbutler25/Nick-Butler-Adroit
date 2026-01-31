@@ -14,7 +14,7 @@ namespace NickButlerAdroit.Api.Services;
 /// and real-time event broadcasting via SignalR. Marked as partial to support
 /// the source-generated regex (<see cref="CustomCodeRegex"/>).
 /// </summary>
-public partial class UrlShortenerService : IUrlShortenerService
+public partial class UrlShortenerService(IUrlRepository repository, IHubContext<UrlHub> hubContext, ILogger<UrlShortenerService> logger) : IUrlShortenerService
 {
     /// <summary>Length of auto-generated short codes (62^7 ≈ 3.5 trillion combinations).</summary>
     private const int GeneratedCodeLength = 7;
@@ -22,16 +22,9 @@ public partial class UrlShortenerService : IUrlShortenerService
     /// <summary>Base62 character set used for random short code generation.</summary>
     private const string AlphanumericChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
-    private readonly IUrlRepository _repository;
-    private readonly IHubContext<UrlHub> _hubContext;
-    private readonly ILogger<UrlShortenerService> _logger;
-
-    public UrlShortenerService(IUrlRepository repository, IHubContext<UrlHub> hubContext, ILogger<UrlShortenerService> logger)
-    {
-        _repository = repository;
-        _hubContext = hubContext;
-        _logger = logger;
-    }
+    private readonly IUrlRepository _repository = repository;
+    private readonly IHubContext<UrlHub> _hubContext = hubContext;
+    private readonly ILogger<UrlShortenerService> _logger = logger;
 
     /// <summary>
     /// Fire-and-forget SignalR notification to all connected clients.
@@ -105,6 +98,7 @@ public partial class UrlShortenerService : IUrlShortenerService
                 throw new DuplicateShortCodeException(customCode);
             }
             var result = await ToResultAsync(entry);
+            _logger.LogInformation("URL created with custom code: {ShortCode} -> {LongUrl}", customCode, normalizedUrl);
             NotifyClients("UrlCreated", result);
             return result;
         }
@@ -118,11 +112,14 @@ public partial class UrlShortenerService : IUrlShortenerService
             if (await _repository.AddAsync(entry))
             {
                 var result = await ToResultAsync(entry);
+                _logger.LogInformation("URL created: {ShortCode} -> {LongUrl}", shortCode, normalizedUrl);
                 NotifyClients("UrlCreated", result);
                 return result;
             }
+            _logger.LogWarning("Auto-generated code collision on attempt {Attempt}: {ShortCode}", attempt + 1, shortCode);
         }
 
+        _logger.LogError("Failed to generate unique short code after {MaxRetries} attempts for URL: {LongUrl}", maxRetries, normalizedUrl);
         throw new DuplicateShortCodeException(
             $"Failed to generate a unique short code after {maxRetries} attempts.");
     }
@@ -136,12 +133,7 @@ public partial class UrlShortenerService : IUrlShortenerService
     {
         ValidateShortCode(shortCode);
 
-        var entry = await _repository.GetByShortCodeAsync(shortCode);
-        if (entry is null)
-        {
-            throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
-        }
-
+        var entry = await _repository.GetByShortCodeAsync(shortCode) ?? throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
         await _repository.IncrementClickCountAsync(shortCode);
         var result = await ToResultAsync(entry);
         NotifyClients("UrlClicked", result.ShortCode, result.ClickCount + 1, result.LongUrl, result.LongUrlClickCount + 1);
@@ -157,12 +149,7 @@ public partial class UrlShortenerService : IUrlShortenerService
     {
         ValidateShortCode(shortCode);
 
-        var entry = await _repository.GetByShortCodeAsync(shortCode);
-        if (entry is null)
-        {
-            throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
-        }
-
+        var entry = await _repository.GetByShortCodeAsync(shortCode) ?? throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
         var newClickCount = await _repository.IncrementClickCountAsync(shortCode);
         // Aggregate clicks across all short codes that point to the same long URL
         var allEntries = await _repository.GetByLongUrlAsync(entry.LongUrl);
@@ -177,12 +164,9 @@ public partial class UrlShortenerService : IUrlShortenerService
         ValidateShortCode(shortCode);
 
         var entry = await _repository.GetByShortCodeAsync(shortCode);
-        if (entry is null)
-        {
-            throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
-        }
-
-        return new UrlStats(entry.ShortCode, entry.ClickCount, entry.CreatedAt);
+        return entry is null
+            ? throw new KeyNotFoundException($"Short code '{shortCode}' not found.")
+            : new UrlStats(entry.ShortCode, entry.ClickCount, entry.CreatedAt);
     }
 
     /// <summary>
@@ -197,6 +181,7 @@ public partial class UrlShortenerService : IUrlShortenerService
             throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
         }
 
+        _logger.LogInformation("URL deleted: {ShortCode}", shortCode);
         NotifyClients("UrlDeleted", shortCode);
     }
 

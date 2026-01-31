@@ -1,0 +1,17 @@
+/* Global reset and base typography.
+   Uses system font stack for fast rendering and native look across platforms. */
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;   /* macOS/iOS smooth rendering */
+  -moz-osx-font-smoothing: grayscale;    /* Firefox on macOS */
+}
+
+/* Monospace font stack for any <code> elements. */
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
