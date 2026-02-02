@@ -126,8 +126,8 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
 
     /// <summary>
     /// Resolves a short code via the API — returns full metadata and increments click count.
-    /// The result includes updated click counts (pre-increment values + 1) since the
-    /// increment and read are not atomic; this provides the most accurate count to the caller.
+    /// Since IncrementClickCountAsync mutates the entry in-place (reference type in the
+    /// ConcurrentDictionary), the subsequent ToResultAsync call reads the already-updated count.
     /// </summary>
     public async Task<ShortUrlResult> ResolveAsync(string shortCode)
     {
@@ -136,8 +136,8 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
         var entry = await _repository.GetByShortCodeAsync(shortCode) ?? throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
         await _repository.IncrementClickCountAsync(shortCode);
         var result = await ToResultAsync(entry);
-        NotifyClients("UrlClicked", result.ShortCode, result.ClickCount + 1, result.LongUrl, result.LongUrlClickCount + 1);
-        return result with { ClickCount = result.ClickCount + 1, LongUrlClickCount = result.LongUrlClickCount + 1 };
+        NotifyClients("UrlClicked", result.ShortCode, result.ClickCount, result.LongUrl, result.LongUrlClickCount);
+        return result;
     }
 
     /// <summary>
@@ -151,9 +151,12 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
 
         var entry = await _repository.GetByShortCodeAsync(shortCode) ?? throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
         var newClickCount = await _repository.IncrementClickCountAsync(shortCode);
-        // Aggregate clicks across all short codes that point to the same long URL
+        // Aggregate clicks across all short codes that point to the same long URL.
+        // The increment above already mutated the entry in-place (ShortUrlEntry is a
+        // reference type in the ConcurrentDictionary), so the sum already includes
+        // the new click — no need to add 1.
         var allEntries = await _repository.GetByLongUrlAsync(entry.LongUrl);
-        var longUrlClickCount = allEntries.Sum(e => e.ClickCount) + 1;
+        var longUrlClickCount = allEntries.Sum(e => e.ClickCount);
         NotifyClients("UrlClicked", shortCode, newClickCount, entry.LongUrl, longUrlClickCount);
         return entry.LongUrl;
     }
@@ -186,12 +189,39 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
     }
 
     /// <summary>
+    /// Maximum allowed length for a long URL. Matches the model-level [StringLength]
+    /// attribute on <see cref="Models.CreateUrlRequest.LongUrl"/>.
+    /// This acts as a defense-in-depth check at the service layer in case the
+    /// service is called directly (e.g., from tests or future internal callers)
+    /// bypassing controller model validation. The 2048-character limit aligns with
+    /// the practical maximum URL length supported by most browsers and web servers.
+    /// </summary>
+    private const int MaxUrlLength = 2048;
+
+    /// <summary>
     /// Validates that the URL is well-formed and uses HTTP or HTTPS scheme.
     /// Rejects non-HTTP schemes (ftp://, javascript:, data:, etc.) to prevent
-    /// open redirect abuse and phishing attacks. Normalizes the URL before returning.
+    /// open redirect abuse and phishing attacks. Also enforces a maximum length
+    /// to prevent memory exhaustion from storing excessively large URLs.
+    /// Normalizes the URL before returning.
     /// </summary>
     private static string ValidateAndNormalizeUrl(string url)
     {
+        // Guard against null/empty input — provides a clear error message instead
+        // of the generic "Invalid URL format" that Uri.TryCreate would produce.
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            throw new ArgumentException("A URL is required.");
+        }
+
+        // Enforce maximum length before parsing to avoid allocating a large Uri
+        // object for URLs that will be rejected anyway. Without this check,
+        // Uri.TryCreate will happily parse multi-megabyte query strings.
+        if (url.Length > MaxUrlLength)
+        {
+            throw new ArgumentException($"URL must not exceed {MaxUrlLength} characters.");
+        }
+
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
             throw new ArgumentException("Invalid URL format.");

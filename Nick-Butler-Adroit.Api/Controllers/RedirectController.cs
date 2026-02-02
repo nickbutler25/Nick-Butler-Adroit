@@ -27,7 +27,7 @@ public class RedirectController : ControllerBase
     /// <summary>
     /// Resolves a short code and redirects (302) to the original long URL.
     /// Also increments the click counter and notifies connected clients via SignalR.
-    /// Rate-limited to 60 requests/minute to guard against bot traffic and click fraud.
+    /// Rate-limited to 60 requests/minute per IP to guard against bot traffic and click fraud.
     /// </summary>
     [HttpGet("{shortCode}")]
     [ApiExplorerSettings(IgnoreApi = true)]   // Excluded from Swagger docs

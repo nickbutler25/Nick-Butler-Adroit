@@ -8,12 +8,12 @@ using NickButlerAdroit.Api.Services;
 
 namespace NickButlerAdroit.Tests.Integration;
 
-public class UrlsControllerTests : IClassFixture<WebApplicationFactory<Program>>
+public class UrlsControllerTests : IClassFixture<NoRateLimitWebApplicationFactory>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly NoRateLimitWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
-    public UrlsControllerTests(WebApplicationFactory<Program> factory)
+    public UrlsControllerTests(NoRateLimitWebApplicationFactory factory)
     {
         _factory = factory;
         _client = factory.CreateClient();
@@ -268,7 +268,9 @@ public class UrlsControllerTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task Post_ExceedingRateLimit_Returns429()
     {
-        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        // Use a standard factory (with rate limiting enabled) for this test
+        using var rateLimitedFactory = new WebApplicationFactory<Program>();
+        var client = rateLimitedFactory.CreateClient();
 
         for (var i = 0; i < 20; i++)
         {
@@ -283,10 +285,12 @@ public class UrlsControllerTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task Resolve_ExceedingRateLimit_Returns429()
     {
-        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        // Use a standard factory (with rate limiting enabled) for this test
+        using var rateLimitedFactory = new WebApplicationFactory<Program>();
+        var client = rateLimitedFactory.CreateClient();
         await client.PostAsJsonAsync("/api/urls", new CreateUrlRequest("https://resolve-ratelimit.com", "reslim"));
 
-        for (var i = 0; i < 20; i++)
+        for (var i = 0; i < 30; i++)
         {
             var resp = await client.GetAsync("/api/urls/reslim");
             Assert.Equal(HttpStatusCode.OK, resp.StatusCode);

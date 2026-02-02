@@ -40,18 +40,36 @@ public class UrlsController : ControllerBase
     }
 
     /// <summary>
+    /// Maximum allowed length for the search query parameter.
+    /// Prevents DoS via excessively large search strings that would cause
+    /// expensive string.Contains() comparisons against every URL in memory.
+    /// 200 characters is generous for any realistic URL substring search.
+    /// </summary>
+    private const int MaxSearchLength = 200;
+
+    /// <summary>
     /// Returns a paginated list of URLs, optionally filtered by a search term
     /// that matches against the long URL. Limit is clamped to [1, 100].
     /// </summary>
     /// <param name="offset">Zero-based offset into the result set.</param>
     /// <param name="limit">Maximum number of items to return (clamped to 1–100).</param>
-    /// <param name="search">Optional search term to filter by long URL.</param>
+    /// <param name="search">Optional search term to filter by long URL (max 200 chars).</param>
     /// <returns>A paged result containing the matching URLs and total count.</returns>
     /// <response code="200">Returns the paginated list of URLs.</response>
+    /// <response code="400">The search term exceeds the maximum allowed length.</response>
     [HttpGet("paged")]
     [ProducesResponseType(typeof(PagedResult<ShortUrlResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetPaged([FromQuery] int offset = 0, [FromQuery] int limit = 50, [FromQuery] string? search = null)
     {
+        // Reject excessively long search terms to prevent CPU-bound DoS.
+        // Without this limit, an attacker could send a multi-megabyte search
+        // string that gets compared against every stored URL via string.Contains().
+        if (search != null && search.Length > MaxSearchLength)
+        {
+            return BadRequest(new ErrorResponse($"Search term must not exceed {MaxSearchLength} characters."));
+        }
+
         // Clamp pagination parameters to safe ranges
         if (offset < 0) offset = 0;
         if (limit < 1) limit = 1;
@@ -82,7 +100,7 @@ public class UrlsController : ControllerBase
     /// Creates a new shortened URL.
     /// Accepts a long URL and an optional custom short code (alias).
     /// If no custom code is provided, one is auto-generated (7-char base62).
-    /// Rate-limited to 20 requests/minute to prevent spam link farms.
+    /// Rate-limited to 20 requests/minute per IP to prevent spam link farms.
     /// </summary>
     /// <param name="request">The long URL and optional custom alias.</param>
     /// <returns>The newly created short URL with metadata.</returns>
@@ -120,7 +138,7 @@ public class UrlsController : ControllerBase
     /// <summary>
     /// Resolves a short code to its full URL details and increments the click counter.
     /// Used for API-based resolution, not browser redirects.
-    /// Rate-limited to 20 requests/minute to prevent scraping.
+    /// Rate-limited to 30 requests/minute per IP to prevent scraping.
     /// </summary>
     /// <param name="shortCode">The short code to resolve.</param>
     /// <returns>The resolved URL with click statistics.</returns>
@@ -155,7 +173,7 @@ public class UrlsController : ControllerBase
     /// <summary>
     /// Deletes a shortened URL by its short code.
     /// Notifies connected SignalR clients of the deletion.
-    /// Rate-limited to 20 requests/minute (shares the "create" policy).
+    /// Rate-limited to 20 requests/minute per IP (shares the "create" policy).
     /// </summary>
     /// <param name="shortCode">The short code to delete.</param>
     /// <returns>A confirmation message.</returns>

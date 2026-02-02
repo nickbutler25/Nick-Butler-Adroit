@@ -34,35 +34,73 @@ builder.Services.AddOpenApi(options =>
     });
 });
 
-// Configure rate limiting with fixed-window policies to prevent abuse.
-// Each policy tracks requests per IP within a 1-minute sliding window.
+// Configure rate limiting with per-IP fixed-window policies to prevent abuse.
+// Each policy partitions by client IP, allowing each address its own 1-minute budget.
+// A global limiter acts as a safety net to protect the in-memory store from being
+// overwhelmed regardless of how many distinct IPs are making requests.
+// When DISABLE_RATE_LIMITING is set (e.g., in integration tests), all policies
+// become no-ops so tests can run without hitting request limits.
+var disableRateLimiting = builder.Configuration.GetValue<bool>("DISABLE_RATE_LIMITING");
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    // URL creation: 20 requests/minute — prevents spam link farms
-    options.AddFixedWindowLimiter("create", limiterOptions =>
+    if (disableRateLimiting)
     {
-        limiterOptions.PermitLimit = 20;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueLimit = 0;     // Reject immediately when limit is reached
-    });
+        // No-op policies for test environments
+        options.AddPolicy("create", (HttpContext _) =>
+            RateLimitPartition.GetNoLimiter(string.Empty));
+        options.AddPolicy("resolve", (HttpContext _) =>
+            RateLimitPartition.GetNoLimiter(string.Empty));
+        options.AddPolicy("redirect", (HttpContext _) =>
+            RateLimitPartition.GetNoLimiter(string.Empty));
+    }
+    else
+    {
+        // Global safety net: 1000 requests/minute across all clients combined.
+        // Protects the in-memory store from distributed attacks (e.g., botnets).
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ =>
+            RateLimitPartition.GetFixedWindowLimiter("global", _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 1000,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
 
-    // URL resolve (API lookup): 20 requests/minute — prevents scraping
-    options.AddFixedWindowLimiter("resolve", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = 20;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueLimit = 0;
-    });
+        // URL creation/deletion: 20 requests/minute per IP — prevents spam link farms
+        options.AddPolicy("create", context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                }));
 
-    // Redirect (click-through): 60 requests/minute — higher limit for normal browsing
-    options.AddFixedWindowLimiter("redirect", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = 60;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueLimit = 0;
-    });
+        // URL resolve (API lookup): 30 requests/minute per IP — prevents scraping
+        options.AddPolicy("resolve", context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                }));
+
+        // Redirect (click-through): 60 requests/minute per IP — higher limit for normal browsing
+        options.AddPolicy("redirect", context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 60,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                }));
+    }
 });
 
 // Register application services as singletons (in-memory storage requires single instance)
