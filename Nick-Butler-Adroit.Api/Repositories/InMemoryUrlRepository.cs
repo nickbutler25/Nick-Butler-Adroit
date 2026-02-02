@@ -13,7 +13,7 @@ namespace NickButlerAdroit.Api.Repositories;
 public class InMemoryUrlRepository : IUrlRepository
 {
     /// <summary>Primary storage: short code → URL entry. ConcurrentDictionary provides thread safety.</summary>
-    private readonly ConcurrentDictionary<string, ShortUrlEntry> _urls = new();
+    private readonly ConcurrentDictionary<string, ShortUrlEntry> _urls = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Atomically adds a new entry. TryAdd returns false if the key already exists,

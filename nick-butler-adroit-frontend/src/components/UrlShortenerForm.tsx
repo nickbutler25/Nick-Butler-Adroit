@@ -53,6 +53,11 @@ const UrlShortenerForm: React.FC<UrlShortenerFormProps> = ({ onUrlCreated }) => 
       return;
     }
 
+    if (customCode && !/^[a-zA-Z0-9]+$/.test(customCode)) {
+      setError('Alias must contain only letters and numbers.');
+      return;
+    }
+
     try {
       const result = await createShortUrl(longUrl, customCode || undefined);
       onUrlCreated(result);
@@ -124,7 +129,7 @@ const UrlShortenerForm: React.FC<UrlShortenerFormProps> = ({ onUrlCreated }) => 
             placeholder="Add alias here"
             className="input-alias"
           />
-          <span className="hint-text">Must be at least 5 characters</span>
+          <span className="hint-text">Must be at least 5 letters or numbers</span>
         </div>
       </div>
 

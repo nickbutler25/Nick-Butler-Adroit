@@ -300,6 +300,163 @@ public class UrlsControllerTests : IClassFixture<NoRateLimitWebApplicationFactor
         Assert.Equal((HttpStatusCode)429, response.StatusCode);
     }
 
+    // --- Non-alphanumeric character validation tests ---
+
+    [Theory]
+    [InlineData("ab@de")]
+    [InlineData("ab$de")]
+    [InlineData("ab%25de")]
+    [InlineData("ab&de")]
+    [InlineData("ab+de")]
+    [InlineData("ab.de")]
+    [InlineData("ab~de")]
+    [InlineData("ab_de")]
+    public async Task Get_NonAlphanumericShortCode_Returns400(string code)
+    {
+        // Note: # is excluded because HttpClient treats it as a URL fragment
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        var response = await client.GetAsync($"/api/urls/{code}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("ab@de")]
+    [InlineData("ab$de")]
+    [InlineData("ab_de")]
+    [InlineData("ab.de")]
+    public async Task Delete_NonAlphanumericShortCode_Returns400(string code)
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        var response = await client.DeleteAsync($"/api/urls/{code}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("ab@de")]
+    [InlineData("ab$de")]
+    [InlineData("ab_de")]
+    [InlineData("ab.de")]
+    public async Task GetStats_NonAlphanumericShortCode_Returns400(string code)
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        var response = await client.GetAsync($"/api/urls/{code}/stats");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("ab@de")]
+    [InlineData("ab$de")]
+    [InlineData("ab_de")]
+    [InlineData("ab.de")]
+    [InlineData("ab~de")]
+    public async Task Redirect_NonAlphanumericShortCode_Returns400(string code)
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync($"/{code}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("ab@de")]
+    [InlineData("ab#de")]
+    [InlineData("ab$de")]
+    [InlineData("ab-de")]
+    [InlineData("ab_de")]
+    [InlineData("ab.de")]
+    public async Task Post_NonAlphanumericCustomCode_Returns400(string code)
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        var response = await client.PostAsJsonAsync("/api/urls", new CreateUrlRequest("https://example.com", code));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // --- Case-insensitive short code tests ---
+
+    [Fact]
+    public async Task Post_WithMixedCaseCustomCode_ReturnsLowercaseCode()
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        var request = new CreateUrlRequest("https://example.com", "CiTest1");
+
+        var response = await client.PostAsJsonAsync("/api/urls", request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<ShortUrlResult>();
+        Assert.NotNull(result);
+        Assert.Equal("citest1", result.ShortCode);
+    }
+
+    [Fact]
+    public async Task Post_DuplicateCodeDifferentCase_Returns409()
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        await client.PostAsJsonAsync("/api/urls", new CreateUrlRequest("https://example.com", "cidup1"));
+
+        var response = await client.PostAsJsonAsync("/api/urls", new CreateUrlRequest("https://other.com", "CIDUP1"));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_WithDifferentCaseThanCreated_Returns200()
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        await client.PostAsJsonAsync("/api/urls", new CreateUrlRequest("https://example.com", "ciget1"));
+
+        var response = await client.GetAsync("/api/urls/CIGET1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<ShortUrlResult>();
+        Assert.NotNull(result);
+        Assert.Equal("https://example.com", result.LongUrl);
+    }
+
+    [Fact]
+    public async Task Delete_WithDifferentCaseThanCreated_Returns200()
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        await client.PostAsJsonAsync("/api/urls", new CreateUrlRequest("https://example.com", "cidel1"));
+
+        var response = await client.DeleteAsync("/api/urls/CIDEL1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetStats_WithDifferentCaseThanCreated_Returns200()
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient();
+        await client.PostAsJsonAsync("/api/urls", new CreateUrlRequest("https://example.com", "cistat1"));
+        await client.GetAsync("/api/urls/cistat1");
+
+        var response = await client.GetAsync("/api/urls/CISTAT1/stats");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var stats = await response.Content.ReadFromJsonAsync<UrlStats>();
+        Assert.NotNull(stats);
+        Assert.Equal(1, stats.ClickCount);
+    }
+
+    [Fact]
+    public async Task Redirect_WithDifferentCaseThanCreated_Returns302()
+    {
+        var client = _factory.WithWebHostBuilder(_ => { }).CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await client.PostAsJsonAsync("/api/urls", new CreateUrlRequest("https://redirect-ci.com", "cirdr1"));
+
+        var response = await client.GetAsync("/CIRDR1");
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.StartsWith("https://redirect-ci.com", response.Headers.Location?.ToString()!);
+    }
+
     [Fact]
     public async Task UnhandledException_Returns500WithJsonError()
     {

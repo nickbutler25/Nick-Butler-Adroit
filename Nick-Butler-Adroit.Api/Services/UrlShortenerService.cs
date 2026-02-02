@@ -16,11 +16,11 @@ namespace NickButlerAdroit.Api.Services;
 /// </summary>
 public partial class UrlShortenerService(IUrlRepository repository, IHubContext<UrlHub> hubContext, ILogger<UrlShortenerService> logger) : IUrlShortenerService
 {
-    /// <summary>Length of auto-generated short codes (62^7 ≈ 3.5 trillion combinations).</summary>
+    /// <summary>Length of auto-generated short codes (36^7 ≈ 78 billion combinations).</summary>
     private const int GeneratedCodeLength = 7;
 
-    /// <summary>Base62 character set used for random short code generation.</summary>
-    private const string AlphanumericChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    /// <summary>Lowercase alphanumeric character set used for random short code generation (case-insensitive codes).</summary>
+    private const string AlphanumericChars = "abcdefghijklmnopqrstuvwxyz0123456789";
 
     private readonly IUrlRepository _repository = repository;
     private readonly IHubContext<UrlHub> _hubContext = hubContext;
@@ -92,6 +92,7 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
         if (customCode is not null)
         {
             ValidateCustomCode(customCode);
+            customCode = customCode.ToLowerInvariant();
             var entry = new ShortUrlEntry(customCode, normalizedUrl);
             if (!await _repository.AddAsync(entry))
             {
@@ -131,7 +132,7 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
     /// </summary>
     public async Task<ShortUrlResult> ResolveAsync(string shortCode)
     {
-        ValidateShortCode(shortCode);
+        shortCode = ValidateAndNormalizeShortCode(shortCode);
 
         var entry = await _repository.GetByShortCodeAsync(shortCode) ?? throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
         await _repository.IncrementClickCountAsync(shortCode);
@@ -147,7 +148,7 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
     /// </summary>
     public async Task<string> ResolveForRedirectAsync(string shortCode)
     {
-        ValidateShortCode(shortCode);
+        shortCode = ValidateAndNormalizeShortCode(shortCode);
 
         var entry = await _repository.GetByShortCodeAsync(shortCode) ?? throw new KeyNotFoundException($"Short code '{shortCode}' not found.");
         var newClickCount = await _repository.IncrementClickCountAsync(shortCode);
@@ -164,7 +165,7 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
     /// <summary>Returns click statistics for a specific short code.</summary>
     public async Task<UrlStats> GetStatsAsync(string shortCode)
     {
-        ValidateShortCode(shortCode);
+        shortCode = ValidateAndNormalizeShortCode(shortCode);
 
         var entry = await _repository.GetByShortCodeAsync(shortCode);
         return entry is null
@@ -177,7 +178,7 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
     /// </summary>
     public async Task DeleteAsync(string shortCode)
     {
-        ValidateShortCode(shortCode);
+        shortCode = ValidateAndNormalizeShortCode(shortCode);
 
         if (!await _repository.DeleteAsync(shortCode))
         {
@@ -291,7 +292,7 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
     /// Validates any short code (custom or auto-generated) before use in lookups.
     /// Ensures it's non-empty, not too long, and alphanumeric to prevent injection.
     /// </summary>
-    private static void ValidateShortCode(string shortCode)
+    private static string ValidateAndNormalizeShortCode(string shortCode)
     {
         if (string.IsNullOrWhiteSpace(shortCode))
         {
@@ -307,13 +308,15 @@ public partial class UrlShortenerService(IUrlRepository repository, IHubContext<
         {
             throw new ArgumentException("Invalid short code format.");
         }
+
+        return shortCode.ToLowerInvariant();
     }
 
     /// <summary>
-    /// Generates a random 7-character base62 short code using <see cref="Random.Shared"/>
+    /// Generates a random 7-character base36 short code using <see cref="Random.Shared"/>
     /// (thread-safe). Uses string.Create for zero-allocation string building.
-    /// With 62^7 ≈ 3.5 trillion combinations, collision probability is negligible
-    /// for in-memory storage scenarios.
+    /// With 36^7 ≈ 78 billion combinations, collision probability is negligible
+    /// for in-memory storage scenarios. Uses only lowercase to support case-insensitive codes.
     /// </summary>
     private static string GenerateShortCode()
     {

@@ -199,4 +199,54 @@ public class InMemoryUrlRepositoryTests
 
         Assert.Equal(2, await _repo.GetCountAsync(null));
     }
+
+    // --- Case-insensitive short code tests ---
+
+    [Fact]
+    public async Task AddAsync_FailsForDuplicateCodeDifferentCase()
+    {
+        await _repo.AddAsync(new ShortUrlEntry("abcde", "https://example.com"));
+
+        var duplicate = new ShortUrlEntry("ABCDE", "https://other.com");
+
+        Assert.False(await _repo.AddAsync(duplicate));
+    }
+
+    [Fact]
+    public async Task GetByShortCodeAsync_FindsEntryRegardlessOfCase()
+    {
+        await _repo.AddAsync(new ShortUrlEntry("abcde", "https://example.com"));
+
+        Assert.NotNull(await _repo.GetByShortCodeAsync("ABCDE"));
+        Assert.NotNull(await _repo.GetByShortCodeAsync("AbCdE"));
+        Assert.NotNull(await _repo.GetByShortCodeAsync("abcde"));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_RemovesEntryRegardlessOfCase()
+    {
+        await _repo.AddAsync(new ShortUrlEntry("abcde", "https://example.com"));
+
+        Assert.True(await _repo.DeleteAsync("ABCDE"));
+        Assert.Null(await _repo.GetByShortCodeAsync("abcde"));
+    }
+
+    [Fact]
+    public async Task ExistsAsync_FindsEntryRegardlessOfCase()
+    {
+        await _repo.AddAsync(new ShortUrlEntry("abcde", "https://example.com"));
+
+        Assert.True(await _repo.ExistsAsync("ABCDE"));
+        Assert.True(await _repo.ExistsAsync("AbCdE"));
+    }
+
+    [Fact]
+    public async Task IncrementClickCountAsync_WorksRegardlessOfCase()
+    {
+        await _repo.AddAsync(new ShortUrlEntry("abcde", "https://example.com"));
+
+        var count = await _repo.IncrementClickCountAsync("ABCDE");
+
+        Assert.Equal(1, count);
+    }
 }

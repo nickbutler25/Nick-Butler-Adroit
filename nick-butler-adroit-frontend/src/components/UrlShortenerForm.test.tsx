@@ -143,6 +143,110 @@ describe('UrlShortenerForm', () => {
     });
   });
 
+  it('shows error when alias contains non-alphanumeric characters', async () => {
+    render(<UrlShortenerForm onUrlCreated={mockOnUrlCreated} />);
+
+    fireEvent.change(screen.getByLabelText(/long url/i), {
+      target: { value: 'https://example.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/alias/i), {
+      target: { value: 'abcd%' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /shorten link/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/alias must contain only letters and numbers/i)).toBeInTheDocument();
+    });
+    expect(mockCreateShortUrl).not.toHaveBeenCalled();
+  });
+
+  it('shows error when alias contains hyphens', async () => {
+    render(<UrlShortenerForm onUrlCreated={mockOnUrlCreated} />);
+
+    fireEvent.change(screen.getByLabelText(/long url/i), {
+      target: { value: 'https://example.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/alias/i), {
+      target: { value: 'my-code' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /shorten link/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/alias must contain only letters and numbers/i)).toBeInTheDocument();
+    });
+    expect(mockCreateShortUrl).not.toHaveBeenCalled();
+  });
+
+  it('shows error when alias contains spaces', async () => {
+    render(<UrlShortenerForm onUrlCreated={mockOnUrlCreated} />);
+
+    fireEvent.change(screen.getByLabelText(/long url/i), {
+      target: { value: 'https://example.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/alias/i), {
+      target: { value: 'my code' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /shorten link/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/alias must contain only letters and numbers/i)).toBeInTheDocument();
+    });
+    expect(mockCreateShortUrl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ab@de', '@'],
+    ['ab#de', '#'],
+    ['ab$de', '$'],
+    ['ab&de', '&'],
+    ['ab+de', '+'],
+    ['ab=de', '='],
+    ['ab.de', '.'],
+    ['ab_de', '_'],
+    ['ab~de', '~'],
+    ['ab!de', '!'],
+  ])('shows error when alias contains %s', async (alias, _char) => {
+    render(<UrlShortenerForm onUrlCreated={mockOnUrlCreated} />);
+
+    fireEvent.change(screen.getByLabelText(/long url/i), {
+      target: { value: 'https://example.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/alias/i), {
+      target: { value: alias },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /shorten link/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/alias must contain only letters and numbers/i)).toBeInTheDocument();
+    });
+    expect(mockCreateShortUrl).not.toHaveBeenCalled();
+  });
+
+  it('allows uppercase alias and submits it to the API', async () => {
+    const result = {
+      shortCode: 'abcde',
+      longUrl: 'https://example.com',
+      clickCount: 0,
+      longUrlClickCount: 0,
+      createdAt: '2025-01-01T00:00:00Z',
+    };
+    mockCreateShortUrl.mockResolvedValue(result);
+
+    render(<UrlShortenerForm onUrlCreated={mockOnUrlCreated} />);
+
+    fireEvent.change(screen.getByLabelText(/long url/i), {
+      target: { value: 'https://example.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/alias/i), {
+      target: { value: 'ABCDE' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /shorten link/i }));
+
+    await waitFor(() => {
+      expect(mockCreateShortUrl).toHaveBeenCalledWith('https://example.com', 'ABCDE');
+    });
+  });
+
   it('displays server error on API failure', async () => {
     mockCreateShortUrl.mockRejectedValue(new Error('Duplicate short code.'));
 

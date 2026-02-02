@@ -108,6 +108,82 @@ test.describe('Home Page', () => {
     expect(updatedClicks).toBeGreaterThan(initialClicks);
   });
 
+  test('custom alias is stored as lowercase', async ({ page }) => {
+    const alias = 'UPPER' + Date.now().toString().slice(-5);
+    const longUrl = 'https://example.com/case-test-' + Date.now();
+
+    await page.locator('#longUrl').fill(longUrl);
+    await page.locator('#customCode').fill(alias);
+    await page.getByRole('button', { name: 'Shorten Link' }).click();
+
+    // The displayed short link should contain the lowercase version of the alias
+    await expect(page.locator('.url-item .short-link').first()).toContainText(alias.toLowerCase(), { timeout: 10000 });
+  });
+
+  test('case-insensitive redirect: uppercase alias resolves the same as lowercase', async ({ page, context }) => {
+    const alias = 'rcase' + Date.now().toString().slice(-5);
+    const longUrl = 'https://example.com/redirect-case-' + Date.now();
+
+    await page.locator('#longUrl').fill(longUrl);
+    await page.locator('#customCode').fill(alias);
+    await page.getByRole('button', { name: 'Shorten Link' }).click();
+    await expect(page.locator('.url-item .short-link').first()).toContainText(alias, { timeout: 10000 });
+
+    // Visit with uppercase version — should still redirect (302)
+    const upperAlias = alias.toUpperCase();
+    const newPage = await context.newPage();
+    const response = await newPage.goto(`/${upperAlias}`, { waitUntil: 'commit' }).catch(() => null);
+    // The redirect should have been initiated (the target may fail to load, but the redirect itself works)
+    // If we got a response, verify it's not a 404
+    if (response) {
+      expect(response.status()).not.toBe(404);
+    }
+    await newPage.close();
+  });
+
+  test('validation: reject non-alphanumeric custom codes', async ({ page }) => {
+    await page.locator('#longUrl').fill('https://example.com/valid');
+    await page.locator('#customCode').fill('abcd%');
+    await page.getByRole('button', { name: 'Shorten Link' }).click();
+
+    await expect(page.locator('.error')).toContainText('only letters and numbers');
+  });
+
+  for (const [label, alias] of [
+    ['@ symbol', 'test@code'],
+    ['# symbol', 'test#code'],
+    ['$ symbol', 'test$code'],
+    ['underscore', 'test_code'],
+    ['dot', 'test.code'],
+    ['hyphen', 'test-code'],
+    ['space', 'test code'],
+  ]) {
+    test(`validation: reject alias with ${label}`, async ({ page }) => {
+      await page.locator('#longUrl').fill('https://example.com/valid');
+      await page.locator('#customCode').fill(alias);
+      await page.getByRole('button', { name: 'Shorten Link' }).click();
+
+      await expect(page.locator('.error')).toBeVisible();
+    });
+  }
+
+  test('duplicate custom code with different case is rejected', async ({ page }) => {
+    const alias = 'dcase' + Date.now().toString().slice(-5);
+
+    // Create with lowercase
+    await page.locator('#longUrl').fill('https://example.com/first');
+    await page.locator('#customCode').fill(alias);
+    await page.getByRole('button', { name: 'Shorten Link' }).click();
+    await expect(page.locator('.url-item .short-link').first()).toContainText(alias, { timeout: 10000 });
+
+    // Try to create with uppercase — should fail
+    await page.locator('#longUrl').fill('https://example.com/second');
+    await page.locator('#customCode').fill(alias.toUpperCase());
+    await page.getByRole('button', { name: 'Shorten Link' }).click();
+
+    await expect(page.locator('.error')).toBeVisible({ timeout: 10000 });
+  });
+
   test('total for URL aggregates clicks across multiple short codes for the same long URL', async ({ page, context }) => {
     const longUrl = 'https://example.com/shared-target-' + Date.now();
     const alias1 = 'first' + Date.now().toString().slice(-6);
